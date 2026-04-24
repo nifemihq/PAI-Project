@@ -1,22 +1,3 @@
-#!/usr/bin/env python3
-"""
-collect.py
-----------
-Standalone long-running data collector for the Dublin Bus reliability project.
-
-Polls the NTA GTFS-Realtime TripUpdates feed every INTERVAL seconds and
-appends stop-level delay observations to data/dublin_bus.db.
-
-Usage:
-    python collect.py                          # reads API key from .env
-    python collect.py --api-key YOUR_KEY
-    python collect.py --duration 180           # collect for 3 hours (default)
-    python collect.py --interval 60            # poll every 60 s (default)
-    python collect.py --label morning_peak     # tag this window in the log
-
-Stop at any time with Ctrl+C — the DB is safe, all writes are committed per poll.
-"""
-
 import argparse
 import logging
 import os
@@ -29,10 +10,6 @@ from pathlib import Path
 import requests
 from google.transit import gtfs_realtime_pb2
 
-# ---------------------------------------------------------------------------
-# Config
-# ---------------------------------------------------------------------------
-
 DB_PATH = Path(__file__).parent / "data" / "dublin_bus.db"
 LOG_PATH = Path(__file__).parent / "data" / "collection.log"
 NTA_URL = "https://api.nationaltransport.ie/gtfsr/v2/gtfsr"
@@ -41,10 +18,6 @@ DUBLIN_BUS_PREFIX = "5570_"
 # Outlier thresholds (kept in DB but excluded from metric computation)
 MAX_DELAY_SECONDS = 90 * 60   # +90 minutes
 MIN_DELAY_SECONDS = -10 * 60  # -10 minutes
-
-# ---------------------------------------------------------------------------
-# Logging
-# ---------------------------------------------------------------------------
 
 logging.basicConfig(
     level=logging.INFO,
@@ -56,11 +29,6 @@ logging.basicConfig(
     ],
 )
 log = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Database helpers
-# ---------------------------------------------------------------------------
 
 def get_conn() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH, timeout=30)
@@ -91,10 +59,6 @@ def insert_observations(conn: sqlite3.Connection, rows: list[dict]) -> int:
     conn.commit()
     return len(rows)
 
-
-# ---------------------------------------------------------------------------
-# GTFS-RT parsing
-# ---------------------------------------------------------------------------
 
 def fetch_feed(api_key: str) -> gtfs_realtime_pb2.FeedMessage:
     resp = requests.get(
@@ -192,10 +156,6 @@ def parse_feed(
     return rows, stats
 
 
-# ---------------------------------------------------------------------------
-# Main loop
-# ---------------------------------------------------------------------------
-
 def run(api_key: str, duration_minutes: int, interval_seconds: int, label: str) -> None:
     conn = get_conn()
     stop_region = load_stop_region_map(conn)
@@ -268,11 +228,6 @@ def run(api_key: str, duration_minutes: int, interval_seconds: int, label: str) 
         log.info(f"Rows inserted this run: {total_inserted:,}")
         log.info(f"Total rows in DB now: {final_count:,}")
         conn.close()
-
-
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
 
 def load_env_key() -> str | None:
     env_file = Path(__file__).parent / ".env"

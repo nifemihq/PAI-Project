@@ -1,28 +1,3 @@
-#!/usr/bin/env python3
-"""
-run_pipeline.py
----------------
-End-to-end pipeline runner for Dublin Bus Reliability Disparity Detection.
-
-Modes:
-  --mode demo      Use synthetic data (default, no API key needed)
-  --mode live      Poll live NTA GTFS-RT API (requires --api-key)
-
-Usage examples:
-  python run_pipeline.py                          # demo mode
-  python run_pipeline.py --mode demo
-  python run_pipeline.py --mode live --api-key YOUR_NTA_KEY
-  python run_pipeline.py --mode live --api-key KEY --polls 10
-
-Steps executed:
-  1. Build / refresh database schema
-  2. Load data (synthetic or live)
-  3. Compute reliability metrics (stop / route / region)
-  4. Run clustering (K-Means, Agglomerative, DBSCAN)
-  5. Generate all figures
-  6. Print summary table
-"""
-
 import sys
 import argparse
 import sqlite3

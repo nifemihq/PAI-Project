@@ -1,20 +1,12 @@
-"""
-pipeline/temporal_stability.py
-────────────────────────────────
-Computes per-window route reliability metrics and stability scores
-for temporal stability analysis across collection sessions.
-"""
 import sqlite3
 import numpy as np
 import pandas as pd
 
-# ── Window definitions (UTC) ─────────────────────────────────────────────────
-# Derived from actual collection session gaps > 5 minutes
 WINDOWS = {
     "Thu Overnight/Morning": ("2026-04-23T01:00:00", "2026-04-23T09:03:00"),
     "Thu Afternoon/Evening": ("2026-04-23T14:49:00", "2026-04-23T18:45:00"),
     "Thu Late Evening":      ("2026-04-23T20:54:00", "2026-04-24T00:05:00"),
-    "Fri Morning Rush":      ("2026-04-24T08:09:00", None),  # up to latest available
+    "Fri Morning Rush":      ("2026-04-24T08:09:00", None),
 }
 
 SHORT_NAMES = {
