@@ -35,6 +35,7 @@ from database import get_connection, initialise_schema
 from reliability_metrics import compute_all_metrics, save_metrics
 from clustering import run_all_clustering
 from visualizations import generate_all_figures
+from temporal_stability import build_temporal_profile
 
 
 def print_summary(conn: sqlite3.Connection, results: dict) -> None:
@@ -181,7 +182,18 @@ def run_live(args) -> None:
     results = run_all_clustering(conn)
 
     print("\n[3/3] Generating figures ...")
-    generate_all_figures(conn, results)
+    dbscan_data = results.get("DBSCAN", {}).get("data")
+    if dbscan_data is not None:
+        cluster_map = dbscan_data[["entity_id", "cluster", "route_short_name"]].rename(
+            columns={"entity_id": "route_id"}
+        )
+        print("\n[4/3] Temporal stability analysis ...")
+        temporal_df = build_temporal_profile(conn)
+    else:
+        cluster_map = None
+        temporal_df = None
+
+    generate_all_figures(conn, results, temporal_df=temporal_df, cluster_map=cluster_map)
 
     print_summary(conn, results)
     conn.close()

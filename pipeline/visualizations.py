@@ -455,7 +455,158 @@ def fig_aggregation_comparison(conn: sqlite3.Connection):
     return _save(fig, "fig10_aggregation_comparison.png")
 
 
-def generate_all_figures(conn: sqlite3.Connection, results: dict) -> list:
+def fig_temporal_cluster_profiles(temporal_df: pd.DataFrame, cluster_map: pd.DataFrame) -> Path:
+    """Fig 11: Mean delay and on-time rate per DBSCAN cluster across time windows."""
+    from temporal_stability import WINDOW_ORDER, cluster_window_profiles
+
+    agg = cluster_window_profiles(temporal_df, cluster_map)
+    present = [w for w in WINDOW_ORDER if w in agg["window_short"].values]
+
+    fig, axes = plt.subplots(1, 2, figsize=(13, 5))
+    for c in sorted(agg.cluster.unique()):
+        sub = agg[agg.cluster == c].set_index("window_short").reindex(present)
+        n = int(sub["n_routes"].median())
+        col = CLUSTER_COLORS[int(c) % len(CLUSTER_COLORS)]
+        axes[0].plot(present, sub["mean_delay"], marker="o", lw=2.2, color=col,
+                     label=f"Cluster {c}  (n≈{n})")
+        axes[1].plot(present, sub["on_time_rate"] * 100, marker="o", lw=2.2, color=col,
+                     label=f"Cluster {c}")
+
+    for ax, (ylabel, title) in zip(axes, [
+        ("Mean Delay (s)",    "Mean Delay per Cluster across Windows"),
+        ("On-Time Rate (%)",  "On-Time Rate per Cluster across Windows"),
+    ]):
+        ax.set_title(title, fontweight="bold")
+        ax.set_ylabel(ylabel)
+        ax.legend(fontsize=9)
+        ax.tick_params(axis="x", rotation=15)
+
+    fig.suptitle("Fig 11: Temporal Stability — DBSCAN Cluster Profiles Across Windows",
+                 fontsize=13, fontweight="bold")
+    plt.tight_layout()
+    return _save(fig, "fig11_temporal_cluster_profiles.png")
+
+
+def fig_route_stability_heatmap(
+    temporal_df: pd.DataFrame, cluster_map: pd.DataFrame, top_n: int = 40
+) -> Path:
+    """Fig 12: Route × window heatmap sorted by volatility (CV)."""
+    merged = temporal_df.merge(
+        cluster_map[["route_id", "route_short_name"]], on="route_id", how="left"
+    )
+    from temporal_stability import WINDOW_ORDER
+
+    present = [w for w in WINDOW_ORDER if w in merged["window_short"].values]
+    pivot = merged.pivot_table(index="route_id", columns="window_short", values="mean_delay")
+    pivot = pivot.reindex(columns=present).dropna(thresh=2)
+
+    pivot_cv = pivot.std(axis=1) / (pivot.mean(axis=1).abs() + 1e-9)
+    pivot = pivot.loc[pivot_cv.nlargest(top_n).index]
+
+    # Normalise: deviation from each route's own mean (fractional)
+    row_mean = pivot.mean(axis=1)
+    pivot_norm = pivot.sub(row_mean, axis=0).div(row_mean.abs() + 1e-9, axis=0)
+
+    name_map = cluster_map.set_index("route_id")["route_short_name"].to_dict()
+    pivot_norm.index = [name_map.get(r, r[-8:]) for r in pivot_norm.index]
+
+    fig, ax = plt.subplots(figsize=(7, 11))
+    sns.heatmap(
+        pivot_norm,
+        cmap="RdYlGn_r",
+        center=0,
+        linewidths=0.3,
+        cbar_kws={"label": "Relative change from route mean (red=worse, green=better)"},
+        ax=ax,
+    )
+    ax.set_xlabel("Time Window")
+    ax.set_ylabel("Route  (most volatile at top)")
+    ax.set_title(
+        f"Fig 12: Route Stability Heatmap\n(top {top_n} most volatile routes)",
+        fontweight="bold",
+    )
+    plt.tight_layout()
+    return _save(fig, "fig12_route_stability_heatmap.png")
+
+
+def fig_stability_by_cluster(temporal_df: pd.DataFrame, cluster_map: pd.DataFrame) -> Path:
+    """Fig 13: Boxplot of route CV (stability score) per DBSCAN cluster."""
+    from temporal_stability import compute_stability_scores
+
+    merged = temporal_df.merge(cluster_map[["route_id", "cluster"]], on="route_id", how="inner")
+    merged = merged[merged.cluster != -1]
+    scores = compute_stability_scores(merged)
+    scores = scores.merge(cluster_map[["route_id", "cluster"]], on="route_id", how="left")
+    scores = scores[scores.n_windows >= 2]
+
+    clusters = sorted(scores.cluster.unique())
+    data = [scores[scores.cluster == c]["cv"].values for c in clusters]
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    bp = ax.boxplot(data, patch_artist=True, labels=[f"Cluster {c}" for c in clusters])
+    for patch, c in zip(bp["boxes"], clusters):
+        patch.set_facecolor(CLUSTER_COLORS[int(c) % len(CLUSTER_COLORS)])
+        patch.set_alpha(0.75)
+    ax.axhline(
+        scores["cv"].median(), color="black", ls="--", lw=1.2, alpha=0.6,
+        label=f"Fleet median CV = {scores['cv'].median():.2f}",
+    )
+    ax.set_ylabel("Coefficient of Variation  (lower = more stable)")
+    ax.set_title(
+        "Fig 13: Route Stability Score by Cluster\n"
+        "(CV of mean_delay across time windows)",
+        fontweight="bold",
+    )
+    ax.legend()
+    plt.tight_layout()
+    return _save(fig, "fig13_stability_by_cluster.png")
+
+
+def fig_thu_vs_fri(temporal_df: pd.DataFrame, cluster_map: pd.DataFrame) -> Path | None:
+    """Fig 14: Thu AM vs Fri Rush mean delay per route (scatter)."""
+    thu = temporal_df[temporal_df.window_short == "Thu AM"][["route_id", "mean_delay"]].copy()
+    fri = temporal_df[temporal_df.window_short == "Fri Rush"][["route_id", "mean_delay"]].copy()
+    if fri.empty:
+        print("  [viz] No Friday morning data — skipping Fig 14.")
+        return None
+
+    cmp = thu.merge(fri, on="route_id", suffixes=("_thu", "_fri"))
+    cmp = cmp.merge(cluster_map[["route_id", "cluster"]], on="route_id", how="left")
+
+    lo = min(cmp[["mean_delay_thu", "mean_delay_fri"]].min())
+    hi = max(cmp[["mean_delay_thu", "mean_delay_fri"]].max())
+
+    fig, ax = plt.subplots(figsize=(7, 7))
+    ax.plot([lo, hi], [lo, hi], "k--", lw=1.2, alpha=0.4, label="No change")
+    for c in sorted(cmp.cluster.dropna().unique()):
+        if c == -1:
+            continue
+        sub = cmp[cmp.cluster == c]
+        ax.scatter(sub.mean_delay_thu, sub.mean_delay_fri,
+                   c=CLUSTER_COLORS[int(c) % len(CLUSTER_COLORS)],
+                   label=f"Cluster {c}  (n={len(sub)})",
+                   s=80, alpha=0.82, edgecolors="white", lw=0.5)
+
+    n_worse  = (cmp.mean_delay_fri > cmp.mean_delay_thu).sum()
+    n_better = (cmp.mean_delay_fri < cmp.mean_delay_thu).sum()
+    ax.text(0.03, 0.97, f"Worse on Fri: {n_worse}\nBetter on Fri: {n_better}",
+            transform=ax.transAxes, va="top", fontsize=9,
+            bbox=dict(boxstyle="round,pad=0.3", fc="white", alpha=0.85))
+    ax.set_xlabel("Mean Delay — Thu Overnight/Morning (s)")
+    ax.set_ylabel("Mean Delay — Fri Morning Rush (s)")
+    ax.set_title("Fig 14: Thu Morning vs Fri Morning Rush\nPer-Route Mean Delay Comparison",
+                 fontweight="bold")
+    ax.legend(fontsize=9)
+    plt.tight_layout()
+    return _save(fig, "fig14_thu_vs_fri.png")
+
+
+def generate_all_figures(
+    conn: sqlite3.Connection,
+    results: dict,
+    temporal_df: pd.DataFrame | None = None,
+    cluster_map: pd.DataFrame | None = None,
+) -> list:
     print("\n[viz] Generating all figures …")
     paths = []
     paths.append(fig_delay_distributions(conn))
@@ -466,6 +617,14 @@ def generate_all_figures(conn: sqlite3.Connection, results: dict) -> list:
     paths.append(fig_cluster_profiles(results))
     paths.append(fig_stop_map(conn, results))
     paths.append(fig_aggregation_comparison(conn))
+
+    if temporal_df is not None and cluster_map is not None and not temporal_df.empty:
+        print("\n[viz] Generating temporal stability figures …")
+        paths.append(fig_temporal_cluster_profiles(temporal_df, cluster_map))
+        paths.append(fig_route_stability_heatmap(temporal_df, cluster_map))
+        paths.append(fig_stability_by_cluster(temporal_df, cluster_map))
+        paths.append(fig_thu_vs_fri(temporal_df, cluster_map))
+
     return [p for p in paths if p is not None]
 
 

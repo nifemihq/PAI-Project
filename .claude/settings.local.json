@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c ' *)",
+      "Bash(python patch_notebook.py)",
+      "Bash(python -c *)",
+      "Bash(python pipeline/temporal_stability.py)",
+      "Bash(python -W ignore -c ' *)",
+      "Read(//c/Users/oluwa/AppData/Local/Temp/claude/c--Users-oluwa-Documents-School-Courses-Programming-for-AI-Bus-Reliability/**)"
+    ]
+  }
+}
